@@ -2,11 +2,11 @@ import os
 import re
 import requests
 
-# Takip edilecek filtreli link
+# Takip edilecek Hepsiburada filtreli URL'si (RTX 5060 + 5070 | Satıcı: Hepsiburada)
 URL = "https://www.hepsiburada.com/laptop-notebook-dizustu-bilgisayarlar-c-98?filtreler=ekrankarti:Nvidia%E2%82%AC20GeForce%E2%82%AC20RTX%E2%82%AC205060,Nvidia%E2%82%AC20GeForce%E2%82%AC20RTX%E2%82%AC205070;satici:Hepsiburada"
 
-# Sayfadaki mevcut referans ürün sayısı (12)
-ESIK_URUN_SAYISI = 12
+# Sayfadaki güncel referans ürün sayısı
+ESIK_URUN_SAYISI = 21
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -29,7 +29,7 @@ def telegram_bildirim_gonder(mesaj):
         "disable_web_page_preview": False
     }
     r = requests.post(api_url, json=payload, timeout=10)
-    print(f"Telegram Yanıt Kodu: {r.status_code}")
+    print(f"Telegram API Yanıtı: {r.status_code}")
 
 def kontrol_et():
     try:
@@ -53,9 +53,9 @@ def kontrol_et():
 
             if guncel_sayi > ESIK_URUN_SAYISI or omen_var_mi:
                 mesaj = (
-                    f"🚨 <b>HEPSİBURADA'YA YENİ STOK GİRDİ!</b>\n\n"
+                    f"🚨 <b>HEPSİBURADA'YA YENİ STOK DÜŞTÜ!</b>\n\n"
                     f"📦 Ürün Sayısı: <b>{guncel_sayi}</b>\n"
-                    f"🔗 <a href='{URL}'>Hemen Ürünleri İncele</a>"
+                    f"🔗 <a href='{URL}'>Hepsiburada Sayfasını Aç</a>"
                 )
                 telegram_bildirim_gonder(mesaj)
                 print("Bildirim Telegram'a iletildi.")
