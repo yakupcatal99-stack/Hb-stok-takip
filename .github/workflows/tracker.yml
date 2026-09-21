@@ -1,0 +1,29 @@
+name: Hepsiburada Stok Takip
+
+on:
+  schedule:
+    # Her 15 dakikada bir otomatik tarar
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # Elle tetikleme butonu
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Kodu İndir
+        uses: actions/checkout@v4
+
+      - name: Python Ortamını Kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Paketleri Yükle
+        run: pip install requests
+
+      - name: Takip Betiğini Çalıştır
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python tracker.py
