@@ -1,6 +1,14 @@
 import os
 import re
-import requests
+import sys
+import subprocess
+
+# curl_cffi kütüphanesini otomatik kur (403 bot engelini aşmak için)
+try:
+    from curl_cffi import requests
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
+    from curl_cffi import requests
 
 # Takip edilecek Hepsiburada filtreli URL'si (RTX 5060 + 5070 | Satıcı: Hepsiburada)
 URL = "https://www.hepsiburada.com/laptop-notebook-dizustu-bilgisayarlar-c-98?filtreler=ekrankarti:Nvidia%E2%82%AC20GeForce%E2%82%AC20RTX%E2%82%AC205060,Nvidia%E2%82%AC20GeForce%E2%82%AC20RTX%E2%82%AC205070;satici:Hepsiburada"
@@ -10,12 +18,6 @@ ESIK_URUN_SAYISI = 21
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8",
-}
 
 def telegram_bildirim_gonder(mesaj):
     if not BOT_TOKEN or not CHAT_ID:
@@ -33,9 +35,12 @@ def telegram_bildirim_gonder(mesaj):
 
 def kontrol_et():
     try:
-        response = requests.get(URL, headers=HEADERS, timeout=20)
+        # Chrome tarayıcısının TLS parmak izini taklit ederek Hepsiburada'ya istek atıyoruz
+        response = requests.get(URL, impersonate="chrome", timeout=25)
+        print(f"Hepsiburada yanıt kodu: {response.status_code}")
+
         if response.status_code != 200:
-            print(f"Hepsiburada yanıt kodu: {response.status_code}")
+            print("Sayfa güvenlik duvarı tarafından engellendi.")
             return
 
         html = response.text
