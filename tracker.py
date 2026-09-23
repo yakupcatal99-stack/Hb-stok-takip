@@ -8,7 +8,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 # Sadece Hepsiburada resmi satıcılı dizüstü bilgisayarlar listesi
 URL = "https://www.hepsiburada.com/laptop-notebook-dizustu-bilgisayarlar-c-98?filtreler=satici:Hepsiburada"
 
-# Sayfadaki güncel ürün tabanı (21 ürün)
+# Sayfadaki güncel taban ürün sayısı
 ESIK_URUN_SAYISI = 21
 
 def send_telegram_message(message):
@@ -24,7 +24,7 @@ def send_telegram_message(message):
     try:
         requests.post(send_url, json=payload, timeout=10)
     except Exception as e:
-        print(f"Telegram hatası: {e}")
+        print(f"Telegram gönderim hatası: {e}")
 
 def check_stock():
     headers = {
@@ -44,12 +44,11 @@ def check_stock():
 
     html = response.text
 
-    # Toplam listelenen ürün sayısını yakala
+    # Toplam listelenen ürün sayısını tespit et
     match = re.search(r'(\d+)\s+ürün', html)
     guncel_sayi = int(match.group(1)) if match else None
 
-    # Ürün kartlarındaki başlıkları filtre menüsünden ayırarak tara
-    # Ürün başlıklarında Omen geçişini denetler
+    # Ürün kartlarında Omen modelini denetle
     omen_var = bool(re.search(r'title=["\'][^"\']*omen[^"\']*["\']', html, re.IGNORECASE)) or \
                bool(re.search(r'>[^<]*hp\s+omen[^<]*<', html, re.IGNORECASE))
 
