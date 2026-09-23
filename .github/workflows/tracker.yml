@@ -20,7 +20,7 @@ jobs:
           python-version: '3.11'
 
       - name: Paketleri Yükle
-        run: pip install requests
+        run: pip install curl-cffi requests
 
       - name: Takip Betiğini Çalıştır
         env:
