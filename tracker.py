@@ -44,26 +44,26 @@ def check_stock():
 
     html = response.text
 
-    # Toplam listelenen ürün sayısını tespit et
+    # Toplam listelenen ürün sayısını yakala
     match = re.search(r'(\d+)\s+ürün', html)
     guncel_sayi = int(match.group(1)) if match else None
 
-    # Ürün kartlarında Omen modelini denetle
-    omen_var = bool(re.search(r'title=["\'][^"\']*omen[^"\']*["\']', html, re.IGNORECASE)) or \
-               bool(re.search(r'>[^<]*hp\s+omen[^<]*<', html, re.IGNORECASE))
+    # SADECE gerçek ürün kartı linklerinde Omen ara (-p-HBCV veya -p-HBV ile biten ürün URL'leri)
+    # Bu filtre menüsündeki veya sayfa altındaki yazıları tamamen eler!
+    omen_var = bool(re.search(r'href=["\'][^"\']*omen[^"\']*-p-HB', html, re.IGNORECASE))
 
-    print(f"Tespit Edilen Ürün: {guncel_sayi} | Eşik: {ESIK_URUN_SAYISI}")
+    print(f"Tespit Edilen Ürün: {guncel_sayi} | Eşik: {ESIK_URUN_SAYISI} | Omen Kartı: {omen_var}")
 
     if omen_var:
-        msg = f"🚨 <b>HP OMEN STOKTA OLABİLİR!</b>\n\nResmi Hepsiburada listesinde Omen tespit edildi.\n\nLink: {URL}"
+        msg = f"🚨 <b>HP OMEN GERÇEKTEN STOKTA!</b>\n\nResmi Hepsiburada listesinde Omen ürün kartı açıldı!\n\nLink: {URL}"
         send_telegram_message(msg)
-        print("Bildirim gönderildi: HP Omen tespit edildi!")
+        print("Bildirim gönderildi: Gerçek HP Omen ürünü tespit edildi!")
     elif guncel_sayi and guncel_sayi > ESIK_URUN_SAYISI:
         msg = f"🔔 <b>HEPSİBURADA YENİ STOK GİRİŞİ!</b>\n\nÜrün sayısı {guncel_sayi}'e yükseldi (Eşik: {ESIK_URUN_SAYISI}).\n\nLink: {URL}"
         send_telegram_message(msg)
-        print("Bildirim gönderildi: Stok sayısı arttı!")
+        print(f"Bildirim gönderildi: Ürün sayısı {guncel_sayi} oldu.")
     else:
-        print("Ne Omen ne de yeni stok artışı var. Nöbet sessizce devam ediyor.")
+        print("Ne gerçek bir Omen kartı ne de stok artışı var. Nöbet sessizce devam ediyor.")
 
 if __name__ == "__main__":
     check_stock()
