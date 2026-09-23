@@ -8,7 +8,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 # Hepsiburada resmi satıcılı dizüstü bilgisayarlar listesi
 URL = "https://www.hepsiburada.com/laptop-notebook-dizustu-bilgisayarlar-c-98?filtreler=satici:Hepsiburada"
 
-# Takip edilen referans ürün tabanı
+# Takip edilen referans taban sayısı
 REFERANS_SAYI = 21
 
 def send_telegram_message(message):
@@ -27,23 +27,21 @@ def send_telegram_message(message):
         print(f"Telegram gönderim hatası: {e}")
 
 def get_product_count(html):
-    # 1. Hepsiburada arka plan JSON verilerini tara
+    # 1. HTML içindeki '21 ürün', '<span>21</span> ürün' yapılarını tara
     patterns = [
-        r'["\']totalProductCount["\']\s*:\s*(\d+)',
-        r'["\']totalCount["\']\s*:\s*(\d+)',
-        r'["\']totalItems["\']\s*:\s*(\d+)',
+        r'>\s*(\d+)\s*<[^>]*>\s*ürün',           # <span>21</span> ürün
+        r'(\d+)\s*ürün\s*listeleniyor',
         r'(\d+)\s*ürün\s*bulundu',
-        r'(\d+)\s*ürün'
+        r'>\s*(\d+)\s+ürün',
+        r'(\d+)\s+ürün'
     ]
     for p in patterns:
         m = re.search(p, html, re.IGNORECASE)
-        if m and int(m.group(1)) > 0:
-            return int(m.group(1))
-
-    # 2. Yedek Plan: Sayfadaki gerçek ürün kartı linklerini (-p-HB...) say
-    product_ids = set(re.findall(r'-p-(HB[A-Z0-9]+)', html))
-    if product_ids:
-        return len(product_ids)
+        if m:
+            val = int(m.group(1))
+            # Güvenlik kilidi: 0 veya 40'tan büyükse bu ana liste değil, vitrin/kategori verisidir
+            if 0 < val <= 40:
+                return val
 
     return None
 
@@ -65,38 +63,36 @@ def check_stock():
 
     html = response.text
 
-    # Ürün sayısını tespit et
-    guncel_sayi = get_product_count(html)
-
-    # SADECE gerçek ürün kartlarında HP Omen ara (menüdeki yazıları eler)
+    # Gerçek ürün kartlarında HP Omen kontrolü
     omen_var = bool(re.search(r'href=["\'][^"\']*omen[^"\']*-p-HB', html, re.IGNORECASE))
+
+    # Temizlenmiş ürün sayısını al
+    guncel_sayi = get_product_count(html)
 
     print(f"Tespit Edilen Ürün: {guncel_sayi} | Referans Taban: {REFERANS_SAYI} | Omen Kartı: {omen_var}")
 
-    # 1. ÖNCELİK: HP Omen tespiti (sayıya bakılmaksızın en acil alarm)
+    # 1. ÖNCELİK: HP Omen tespiti (sayıya bakılmaksızın doğrudan kırmızı alarm)
     if omen_var:
         msg = (
             f"🚨 <b>HP OMEN GERÇEKTEN STOKTA!</b>\n\n"
             f"Resmi Hepsiburada listesinde HP Omen ürün kartı açıldı!\n\n"
-            f"Toplam Ürün: {guncel_sayi}\n"
             f"Link: {URL}"
         )
         send_telegram_message(msg)
         print("Bildirim gönderildi: Gerçek HP Omen tespit edildi!")
 
-    # 2. ÖNCELİK: Stok artışı (> 21) - Kaç ürün girerse girsin dinamik hesaplar
+    # 2. ÖNCELİK: Gerçek stok artışı (21 < guncel_sayi <= 40)
     elif guncel_sayi is not None and guncel_sayi > REFERANS_SAYI:
         fark = guncel_sayi - REFERANS_SAYI
         msg = (
             f"🔔 <b>HEPSİBURADA'YA YENİ STOK GİRDİ!</b>\n\n"
             f"Ürün sayısı <b>{REFERANS_SAYI}</b> iken <b>{guncel_sayi}</b> oldu (<b>+{fark}</b> yeni ürün eklendi).\n\n"
-            f"Depoya yeni bilgisayar girişi yapıldı, hemen kontrol edin:\n"
             f"Link: {URL}"
         )
         send_telegram_message(msg)
         print(f"Bildirim gönderildi: Stok sayısı arttı ({guncel_sayi}).")
 
-    # 3. ÖNCELİK: Stok düşüşü (< 21) - Kaç ürün biterse bitsin dinamik hesaplar
+    # 3. ÖNCELİK: Gerçek stok düşüşü (guncel_sayi < 21)
     elif guncel_sayi is not None and guncel_sayi < REFERANS_SAYI:
         fark = REFERANS_SAYI - guncel_sayi
         msg = (
@@ -108,7 +104,7 @@ def check_stock():
         print(f"Bildirim gönderildi: Stok sayısı azaldı ({guncel_sayi}).")
 
     else:
-        print(f"Durum stabil. Ürün sayısı {guncel_sayi} ve Omen yok. Nöbet sessizce devam ediyor.")
+        print(f"Durum stabil (Sayı: {guncel_sayi}). Sahte alarm yok, nöbet devam ediyor.")
 
 if __name__ == "__main__":
     check_stock()
