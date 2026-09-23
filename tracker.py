@@ -1,113 +1,70 @@
 import os
 import re
-import sys
-import subprocess
+from curl_cffi import requests
 
-try:
-    from curl_cffi import requests
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "curl_cffi"])
-    from curl_cffi import requests
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-URL = "https://www.hepsiburada.com/laptop-notebook-dizustu-bilgisayarlar-c-98?filtreler=ekrankarti:Nvidia%E2%82%AC20GeForce%E2%82%AC20RTX%E2%82%AC205060,Nvidia%E2%82%AC20GeForce%E2%82%AC20RTX%E2%82%AC205070;satici:Hepsiburada"
+# Sadece Hepsiburada resmi satıcılı dizüstü bilgisayarlar listesi
+URL = "https://www.hepsiburada.com/laptop-notebook-dizustu-bilgisayarlar-c-98?filtreler=satici:Hepsiburada"
 
-# Mevcut ürün sayısı eşiği
-ESIK_URUN_SAYISI = 22
+# Sayfadaki güncel ürün tabanı (21 ürün)
+ESIK_URUN_SAYISI = 21
 
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-
-def telegram_bildirim_gonder(mesaj):
-    if not BOT_TOKEN or not CHAT_ID:
-        print("Telegram kimlik bilgileri eksik!")
+def send_telegram_message(message):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram bilgileri eksik!")
         return
-    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    send_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
-        "chat_id": CHAT_ID,
-        "text": mesaj,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": False
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
     }
-    r = requests.post(api_url, json=payload, timeout=10)
-    print(f"Telegram API Yanıtı: {r.status_code}")
-
-def urun_basliklarini_ayikla(html):
-    """
-    Filtre menüsünü hariç tutarak yalnızca gerçek ürün başlıklarını toplar.
-    """
-    basliklar = []
-    
-    # 1. Hepsiburada ürün kartı başlık etiketleri
-    bulunanlar = re.findall(r'<h3[^>]*data-test-id="product-card-name"[^>]*>(.*?)</h3>', html, re.IGNORECASE | re.DOTALL)
-    if not bulunanlar:
-        bulunanlar = re.findall(r'<h3[^>]*class="[^"]*product-name[^"]*"[^>]*>(.*?)</h3>', html, re.IGNORECASE | re.DOTALL)
-    basliklar.extend(bulunanlar)
-
-    # 2. Sayfa içi JSON ürün isimleri
-    json_isimler = re.findall(r'"name":\s*"([^"]*(?:laptop|bilgisayar|notebook|omen)[^"]*)"', html, re.IGNORECASE)
-    basliklar.extend(json_isimler)
-
-    # HTML artıklarını temizle
-    temiz_liste = []
-    for b in basliklar:
-        temiz = re.sub(r'<[^>]+>', '', b).strip()
-        if temiz and len(temiz) > 5:
-            temiz_liste.append(temiz)
-            
-    return list(set(temiz_liste))
-
-def kontrol_et():
     try:
-        response = requests.get(URL, impersonate="chrome", timeout=25)
-        print(f"Hepsiburada yanıt kodu: {response.status_code}")
-
-        if response.status_code != 200:
-            print("Sayfa güvenlik duvarı tarafından engellendi.")
-            return
-
-        html = response.text
-        
-        # Sayfadaki güncel ürün sayısını bul
-        eslesme = re.search(r'\((\d+)\s*ürün\)', html, re.IGNORECASE)
-        if not eslesme:
-            eslesme = re.search(r'"totalProductCount":\s*(\d+)', html)
-        if not eslesme:
-            eslesme = re.search(r'(\d+)\s*ürün', html, re.IGNORECASE)
-
-        guncel_sayi = int(eslesme.group(1)) if eslesme else None
-        if guncel_sayi is not None:
-            print(f"Tespit Edilen Ürün: {guncel_sayi} | Eşik: {ESIK_URUN_SAYISI}")
-
-        # Başlıklarda Omen ara
-        urunler = urun_basliklarini_ayikla(html)
-        bulunan_omenler = [u for u in urunler if "omen" in u.lower()]
-
-        # 1. ÖNCELİK: Başlıkta doğrudan Omen tespit edilirse
-        if bulunan_omenler:
-            print(f"OMEN YAKALANDI: {bulunan_omenler[0]}")
-            mesaj = (
-                f"🎯 <b>HP OMEN SATIŞA ÇIKTI!</b>\n\n"
-                f"💻 <b>Model:</b> {bulunan_omenler[0]}\n"
-                f"📦 Toplam Ürün: <b>{guncel_sayi or 22}</b>\n\n"
-                f"🔗 <a href='{URL}'>Hemen Satın Al / İncele</a>"
-            )
-            telegram_bildirim_gonder(mesaj)
-            
-        # 2. ÖNCELİK: Omen ismi bulunamasa bile toplam stok arttıysa (23 ve üzeri)
-        elif guncel_sayi and guncel_sayi > ESIK_URUN_SAYISI:
-            print(f"Yeni ürün eklendi ({guncel_sayi} > {ESIK_URUN_SAYISI})")
-            mesaj = (
-                f"🚨 <b>HEPSİBURADA'YA YENİ LAPTOP GİRDİ!</b>\n\n"
-                f"📦 Ürün Sayısı: <b>{guncel_sayi}</b> (Önceki: {ESIK_URUN_SAYISI})\n"
-                f"ℹ️ Yeni bir model stoğa girdi, kontrol etmenizde fayda var.\n\n"
-                f"🔗 <a href='{URL}'>Hepsiburada Sayfasını Aç</a>"
-            )
-            telegram_bildirim_gonder(mesaj)
-        else:
-            print("Ne Omen ne de yeni stok artışı var. Nöbet sessizce devam ediyor.")
-
+        requests.post(send_url, json=payload, timeout=10)
     except Exception as e:
-        print(f"Bağlantı hatası: {e}")
+        print(f"Telegram hatası: {e}")
+
+def check_stock():
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+    try:
+        response = requests.get(URL, headers=headers, impersonate="chrome124", timeout=20)
+        print(f"Hepsiburada yanıt kodu: {response.status_code}")
+    except Exception as e:
+        print(f"İstek hatası: {e}")
+        return
+
+    if response.status_code != 200:
+        print("Sayfaya erişilemedi.")
+        return
+
+    html = response.text
+
+    # Toplam listelenen ürün sayısını yakala
+    match = re.search(r'(\d+)\s+ürün', html)
+    guncel_sayi = int(match.group(1)) if match else None
+
+    # Ürün kartlarındaki başlıkları filtre menüsünden ayırarak tara
+    # Ürün başlıklarında Omen geçişini denetler
+    omen_var = bool(re.search(r'title=["\'][^"\']*omen[^"\']*["\']', html, re.IGNORECASE)) or \
+               bool(re.search(r'>[^<]*hp\s+omen[^<]*<', html, re.IGNORECASE))
+
+    print(f"Tespit Edilen Ürün: {guncel_sayi} | Eşik: {ESIK_URUN_SAYISI}")
+
+    if omen_var:
+        msg = f"🚨 <b>HP OMEN STOKTA OLABİLİR!</b>\n\nResmi Hepsiburada listesinde Omen tespit edildi.\n\nLink: {URL}"
+        send_telegram_message(msg)
+        print("Bildirim gönderildi: HP Omen tespit edildi!")
+    elif guncel_sayi and guncel_sayi > ESIK_URUN_SAYISI:
+        msg = f"🔔 <b>HEPSİBURADA YENİ STOK GİRİŞİ!</b>\n\nÜrün sayısı {guncel_sayi}'e yükseldi (Eşik: {ESIK_URUN_SAYISI}).\n\nLink: {URL}"
+        send_telegram_message(msg)
+        print("Bildirim gönderildi: Stok sayısı arttı!")
+    else:
+        print("Ne Omen ne de yeni stok artışı var. Nöbet sessizce devam ediyor.")
 
 if __name__ == "__main__":
-    kontrol_et()
+    check_stock()
