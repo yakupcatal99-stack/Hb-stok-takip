@@ -33,28 +33,27 @@ TARGET_IDENTIFIERS = (
 TARGET_GOOD_PRICE = 69999
 TARGET_HIGH_PRICE = 79999
 
-STATE_FILE = Path("state.json")
-DEBUG_FILE = Path("hepsiburada_debug.html")
-
-BASE_URL = "https://www.hepsiburada.com"
-
 ALLOWED_SELLERS = {
     "hepsiburada",
     "hp store türkiye",
 }
+
+BASE_URL = "https://www.hepsiburada.com"
+STATE_FILE = Path("state.json")
+DEBUG_FILE = Path("hepsiburada_debug.html")
 
 
 def send_telegram_message(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         raise RuntimeError("Telegram secret bilgileri eksik.")
 
-    url = (
+    send_url = (
         f"https://api.telegram.org/bot"
         f"{TELEGRAM_BOT_TOKEN}/sendMessage"
     )
 
     response = requests.post(
-        url,
+        send_url,
         json={
             "chat_id": TELEGRAM_CHAT_ID,
             "text": message,
@@ -80,8 +79,13 @@ def fetch_page():
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/124.0.0.0 Safari/537.36"
         ),
+        "Accept": (
+            "text/html,application/xhtml+xml,"
+            "application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ),
         "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
         "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
 
     last_error = None
@@ -104,11 +108,13 @@ def fetch_page():
                 return response.text
 
             last_error = RuntimeError(
-                f"HTTP {response.status_code}"
+                f"HTTP {response.status_code}, "
+                f"{len(response.text)} byte"
             )
 
         except Exception as exc:
             last_error = exc
+            print(f"Istek hatasi: {exc}")
 
         if attempt < 3:
             time.sleep(3)
@@ -129,7 +135,10 @@ def get_product_count(html):
     )
 
     if match:
-        return int(match.group(1).replace(".", ""))
+        count = int(match.group(1).replace(".", ""))
+
+        if 0 < count < 1000:
+            return count
 
     match = re.search(
         r'"totalProductCount"\s*:\s*(\d+)',
@@ -138,7 +147,10 @@ def get_product_count(html):
     )
 
     if match:
-        return int(match.group(1))
+        count = int(match.group(1))
+
+        if 0 < count < 1000:
+            return count
 
     return None
 
@@ -147,19 +159,24 @@ def parse_tr_price(value):
     if not value:
         return None
 
-    value = re.sub(r"[^\d.,]", "", value)
+    cleaned = re.sub(r"[^\d.,]", "", value)
 
-    if not value:
+    if not cleaned:
         return None
 
     try:
-        if "," in value:
-            value = value.replace(".", "")
-            value = value.replace(",", ".")
+        if "," in cleaned:
+            cleaned = cleaned.replace(".", "")
+            cleaned = cleaned.replace(",", ".")
         else:
-            value = value.replace(".", "")
+            cleaned = cleaned.replace(".", "")
 
-        return float(value)
+        price = float(cleaned)
+
+        if price <= 0:
+            return None
+
+        return price
 
     except ValueError:
         return None
@@ -169,9 +186,9 @@ def format_price(price):
     if price is None:
         return "Fiyat okunamadi"
 
-    integer = int(round(price))
+    value = int(round(price))
 
-    return f"{integer:,}".replace(",", ".") + " TL"
+    return f"{value:,}".replace(",", ".") + " TL"
 
 
 def classify_target_price(price):
@@ -212,6 +229,11 @@ def extract_products(html):
 
     print(f"Ana liste kart adayi: {len(cards)}")
 
+    allowed_sellers = {
+        seller.casefold()
+        for seller in ALLOWED_SELLERS
+    }
+
     for card in cards:
         link = card.select_one(
             'h2[data-test-id^="title-"] a[href*="-p-HB"], '
@@ -242,9 +264,7 @@ def extract_products(html):
             [""],
         )[0].strip()
 
-        if seller.casefold() not in {
-            x.casefold() for x in ALLOWED_SELLERS
-        }:
+        if seller.casefold() not in allowed_sellers:
             continue
 
         key = product_key_from_url(product_url)
@@ -295,6 +315,7 @@ def extract_products(html):
 def load_state():
     if not STATE_FILE.exists():
         return {
+            "initialized": False,
             "count": None,
             "omen_keys": [],
             "target_keys": [],
@@ -305,10 +326,18 @@ def load_state():
             "r",
             encoding="utf-8",
         ) as file:
-            return json.load(file)
+            state = json.load(file)
 
-    except Exception:
+        if not isinstance(state, dict):
+            raise ValueError("State formati gecersiz.")
+
+        return state
+
+    except Exception as exc:
+        print(f"State okunamadi: {exc}")
+
         return {
+            "initialized": False,
             "count": None,
             "omen_keys": [],
             "target_keys": [],
@@ -317,6 +346,7 @@ def load_state():
 
 def save_state(count, omen_keys, target_keys):
     state = {
+        "initialized": True,
         "count": count,
         "omen_keys": sorted(omen_keys),
         "target_keys": sorted(target_keys),
@@ -336,12 +366,11 @@ def save_state(count, omen_keys, target_keys):
 
 def target_message(product):
     title = html_lib.escape(product["title"])
-    url = html_lib.escape(
+    seller = html_lib.escape(product["seller"])
+    product_url = html_lib.escape(
         product["url"],
         quote=True,
     )
-
-    seller = html_lib.escape(product["seller"])
 
     return (
         "🚨🚨 <b>HEDEF OMEN 16 STOKTA!</b> 🚨🚨\n\n"
@@ -349,54 +378,51 @@ def target_message(product):
         "🎯 CE2B2EA / AP0010NT hedef modeli\n"
         f"💰 <b>{format_price(product['price'])}</b>\n"
         f"{classify_target_price(product['price'])}\n"
-        f"🏪 Satıcı: <b>{seller}</b>\n\n"
-        f'⚡ <a href="{url}">URUNU HEMEN AC</a>'
+        f"🏪 Satici: <b>{seller}</b>\n\n"
+        f'⚡ <a href="{product_url}">URUNU HEMEN AC</a>'
     )
 
 
 def omen_message(product):
     title = html_lib.escape(product["title"])
-    url = html_lib.escape(
+    seller = html_lib.escape(product["seller"])
+    product_url = html_lib.escape(
         product["url"],
         quote=True,
     )
 
-    seller = html_lib.escape(product["seller"])
-
     return (
-        "🚨 <b>HP OMEN STOKTA!</b>\n\n"
+        "🚨 <b>YENI HP OMEN STOKTA!</b>\n\n"
         f"<b>{title}</b>\n\n"
         f"💰 <b>{format_price(product['price'])}</b>\n"
-        f"🏪 Satıcı: <b>{seller}</b>\n\n"
-        f'🔗 <a href="{url}">OMEN URUNUNU AC</a>'
+        f"🏪 Satici: <b>{seller}</b>\n\n"
+        f'🔗 <a href="{product_url}">OMEN URUNUNU AC</a>'
     )
 
 
-def count_message(count):
-    if count > REFERANS_SAYI:
-        diff = count - REFERANS_SAYI
+def count_change_message(previous_count, current_count):
+    difference = current_count - previous_count
 
+    if difference > 0:
         return (
-            "🔔 <b>YENI STOK GIRDI</b>\n\n"
-            f"Referans: <b>{REFERANS_SAYI}</b>\n"
-            f"Guncel: <b>{count}</b>\n"
-            f"Degisim: <b>+{diff}</b>"
+            "🔔 <b>STOK ARTTI</b>\n\n"
+            f"Onceki: <b>{previous_count}</b>\n"
+            f"Guncel: <b>{current_count}</b>\n"
+            f"Degisim: <b>+{difference}</b>"
         )
-
-    diff = REFERANS_SAYI - count
 
     return (
         "⚠️ <b>STOK AZALDI</b>\n\n"
-        f"Referans: <b>{REFERANS_SAYI}</b>\n"
-        f"Guncel: <b>{count}</b>\n"
-        f"Degisim: <b>-{diff}</b>"
+        f"Onceki: <b>{previous_count}</b>\n"
+        f"Guncel: <b>{current_count}</b>\n"
+        f"Degisim: <b>{difference}</b>"
     )
 
 
 def check_stock():
-    print("=" * 50)
+    print("=" * 60)
     print("HP OMEN TRACKER BASLADI")
-    print(f"Referans: {REFERANS_SAYI}")
+    print(f"Referans urun sayisi: {REFERANS_SAYI}")
 
     html = fetch_page()
 
@@ -409,7 +435,8 @@ def check_stock():
         )
 
         raise RuntimeError(
-            "Urun sayisi okunamadi."
+            "Urun sayisi okunamadi. "
+            "Telegram bildirimi uretilmedi."
         )
 
     products = extract_products(html)
@@ -421,17 +448,20 @@ def check_stock():
         )
 
         raise RuntimeError(
-            "Urun kartlari parse edilemedi."
+            "Urun kartlari parse edilemedi. "
+            "Telegram bildirimi uretilmedi."
         )
 
     omens = [
-        p for p in products
-        if p["is_omen"]
+        product
+        for product in products
+        if product["is_omen"]
     ]
 
     targets = [
-        p for p in products
-        if p["is_exact_target"]
+        product
+        for product in products
+        if product["is_exact_target"]
     ]
 
     print(
@@ -445,6 +475,11 @@ def check_stock():
 
     previous_count = state.get("count")
 
+    initialized = bool(
+        state.get("initialized")
+        or previous_count is not None
+    )
+
     old_omen_keys = set(
         state.get("omen_keys", [])
     )
@@ -454,13 +489,16 @@ def check_stock():
     )
 
     current_omen_keys = {
-        p["key"] for p in omens
+        product["key"]
+        for product in omens
     }
 
     current_target_keys = {
-        p["key"] for p in targets
+        product["key"]
+        for product in targets
     }
 
+    # CE2B2EA her zaman oncelikli.
     for product in targets:
         if product["key"] not in old_target_keys:
             print(
@@ -471,35 +509,68 @@ def check_stock():
                 target_message(product)
             )
 
-    for product in omens:
-        if (
-            product["key"] not in old_omen_keys
-            and not product["is_exact_target"]
-        ):
-            print(
-                f"YENI OMEN: {product['title']}"
-            )
+    # Yalnizca YENI Omen bildir.
+    # State ilk kez kuruluyorsa mevcut Omen'leri spamleme.
+    if initialized:
+        for product in omens:
+            if (
+                product["key"] not in old_omen_keys
+                and not product["is_exact_target"]
+            ):
+                print(
+                    f"YENI OMEN: {product['title']}"
+                )
 
-            send_telegram_message(
-                omen_message(product)
-            )
+                send_telegram_message(
+                    omen_message(product)
+                )
 
-    if (
-        current_count != REFERANS_SAYI
-        and current_count != previous_count
-    ):
-        send_telegram_message(
-            count_message(current_count)
+    else:
+        print(
+            "Ilk baseline: mevcut Omen'ler "
+            "sessizce state'e kaydediliyor."
         )
 
-    elif current_count == REFERANS_SAYI:
+    # STOK SAYISI TAKIBI
+    #
+    # 28 -> 27 = -1 bildirim
+    # 27 -> 28 = +1 bildirim
+    # 28 -> 29 = +1 bildirim
+    # 29 -> 28 = -1 bildirim
+    # ayni sayi = sessiz
+
+    if previous_count is None:
+
+        if current_count != REFERANS_SAYI:
+            send_telegram_message(
+                count_change_message(
+                    REFERANS_SAYI,
+                    current_count,
+                )
+            )
+
+        else:
+            print(
+                f"Ilk stok baseline'i: {current_count}"
+            )
+
+    elif current_count != previous_count:
+
         print(
-            f"Stok stabil: {current_count}"
+            f"Stok degisti: "
+            f"{previous_count} -> {current_count}"
+        )
+
+        send_telegram_message(
+            count_change_message(
+                previous_count,
+                current_count,
+            )
         )
 
     else:
         print(
-            f"Stok daha once bildirildi: {current_count}"
+            f"Stok degismedi: {current_count}"
         )
 
     save_state(
@@ -509,7 +580,7 @@ def check_stock():
     )
 
     print("Kontrol tamamlandi.")
-    print("=" * 50)
+    print("=" * 60)
 
 
 if __name__ == "__main__":
